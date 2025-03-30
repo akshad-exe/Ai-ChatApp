@@ -12,34 +12,38 @@ import { Label } from '@/components/ui/label';
 import { Mail, Lock, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { GoogleIcon, GitHubIcon } from '@/components/social-icons';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'react-toastify';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
+  const [credentials, setCredentials] = useState({
     email: '',
-    password: '',
+    password: ''
   });
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const setUser = useStore((state) => state.setUser);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+  const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
     setLoading(true);
 
     try {
-      const data = await authService.login(formData.email, formData.password);
-      setUser(data.user);
-      router.push('/chat');
-    } catch (err) {
-      console.error('Login failed:', err);
+      const result = await login(credentials);
+      if (result.success) {
+        console.log('Login successful, redirecting to chat...'); // Debug log
+        setUser(result.user);
+        router.push('/chat');
+      } else {
+        setError(result.error || 'Login failed');
+        console.error('Login failed:', result.error); // Debug log
+      }
+    } catch (error) {
+      console.error('Login error:', error); // Debug log
+      setError('An error occurred during login');
     } finally {
       setLoading(false);
     }
@@ -72,6 +76,11 @@ export default function LoginPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div className="rounded-md bg-red-50 p-4">
+                    <div className="text-sm text-red-700">{error}</div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm font-medium">
                     Email
@@ -84,8 +93,8 @@ export default function LoginPage() {
                       type="email"
                       required
                       placeholder="name@example.com"
-                      value={formData.email}
-                      onChange={handleChange}
+                      value={credentials.email}
+                      onChange={(e) => setCredentials({ ...credentials, email: e.target.value })}
                       className="pl-9 transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
@@ -110,8 +119,8 @@ export default function LoginPage() {
                       type="password"
                       required
                       placeholder="Enter your password"
-                      value={formData.password}
-                      onChange={handleChange}
+                      value={credentials.password}
+                      onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                       className="pl-9 transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                     />
                   </div>

@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { User, Mail, Lock, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { GoogleIcon, GitHubIcon } from '@/components/social-icons';
+import { API_ENDPOINTS } from '@/config/api';
+
 
 export default function RegisterPage() {
   const router = useRouter();

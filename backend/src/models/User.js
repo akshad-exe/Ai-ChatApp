@@ -46,6 +46,20 @@ const userSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     }
+  },
+  name: {
+    type: String,
+    trim: true,
+    default: function() {
+      // If no name is provided, use the email username as default
+      return this.email.split('@')[0];
+    }
+  },
+  resetPasswordToken: String,
+  resetPasswordExpires: Date,
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true

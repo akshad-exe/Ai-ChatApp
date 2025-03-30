@@ -1,35 +1,5 @@
 const mongoose = require('mongoose');
 
-const messageSchema = new mongoose.Schema({
-  sender: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  content: {
-    type: String,
-    required: true
-  },
-  type: {
-    type: String,
-    enum: ['text', 'image', 'video', 'audio', 'file'],
-    default: 'text'
-  },
-  mediaUrl: {
-    type: String
-  },
-  isAI: {
-    type: Boolean,
-    default: false
-  },
-  readBy: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }]
-}, {
-  timestamps: true
-});
-
 const chatSchema = new mongoose.Schema({
   participants: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -70,12 +40,6 @@ const chatSchema = new mongoose.Schema({
     type: Map,
     of: mongoose.Schema.Types.Mixed,
     default: {}
-  },
-  messages: [messageSchema],
-  unreadCounts: {
-    type: Map,
-    of: Number,
-    default: new Map()
   }
 }, {
   timestamps: true

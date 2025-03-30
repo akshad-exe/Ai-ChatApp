@@ -1,6 +1,8 @@
-import MainLayout from '@/components/layout/MainLayout';
-import ChatWindow from '@/components/chat/ChatWindow';
-// import ProtectedRoute from '@/components/auth/ProtectedRoute';
+'use client';
+
+import MainLayout from '../../components/layouts/MainLayout';
+import ChatWindow from '../../components/chat/ChatWindow';
+import ProtectedRoute from '../../components/ProtectedRoute';
 
 export default function ChatPage() {
   return (

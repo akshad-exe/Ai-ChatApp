@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
+const dotenv = require('dotenv');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -16,14 +17,14 @@ const userRoutes = require('./routes/userRoutes');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
-const auth = require('./middleware/auth');
+const authMiddleware = require('./middleware/auth');
 const { apiLimiter, authLimiter } = require('./middleware/rateLimiter');
 
 // Import socket service
 const SocketService = require('./services/socketService');
 
 // Load environment variables
-require('dotenv').config();
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -87,8 +88,8 @@ app.use('/api', apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/chat', auth, chatRoutes);
-app.use('/api/users', auth, userRoutes);
+app.use('/api/chat', authMiddleware, chatRoutes);
+app.use('/api/users', authMiddleware, userRoutes);
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -97,7 +98,7 @@ io.on('connection', (socket) => {
   // Authenticate socket connection
   socket.on('authenticate', async (token) => {
     try {
-      const decoded = await auth.verifyToken(token);
+      const decoded = await authMiddleware.verifyToken(token);
       socket.userId = decoded.userId;
       console.log(`User ${decoded.userId} authenticated on socket`);
     } catch (error) {
