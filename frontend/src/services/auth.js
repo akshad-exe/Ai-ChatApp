@@ -1,59 +1,103 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+import api from './api';
+import { toast } from 'react-toastify';
+
+// Debug logging
+const debug = (message, data = {}) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[Auth] ${message}`, data);
+  }
+};
 
 export const authService = {
   async login(email, password) {
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Login failed');
-      }
-
-      const data = await response.json();
-      // Store token in localStorage
-      localStorage.setItem('token', data.token);
-      return data;
+      debug('Attempting login', { email });
+      const response = await api.post('/auth/login', { email, password });
+      const { token, refreshToken, user } = response.data;
+      
+      // Store tokens in localStorage
+      localStorage.setItem('token', token);
+      localStorage.setItem('refreshToken', refreshToken);
+      localStorage.setItem('user', JSON.stringify(user));
+      
+      toast.success('Successfully logged in!');
+      
+      debug('Login successful', { user: { ...user, password: undefined } });
+      return response.data;
     } catch (error) {
-      throw error;
+      debug('Login failed:', error);
+      toast.error(error.response?.data?.message || 'Failed to login. Please try again.');
+      throw new Error(error.response?.data?.message || 'Login failed');
     }
   },
 
-  async register(email, password, name) {
+  async register(userData) {
     try {
-      const response = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password, name }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Registration failed');
-      }
-
-      const data = await response.json();
-      return data;
+      debug('Attempting registration', { ...userData, password: undefined });
+      const response = await api.post('/auth/register', userData);
+      const { token, refreshToken, user } = response.data;
+      
+      // Store tokens in localStorage
+      localStorage.setItem('token', token);
+      localStorage.setItem('refreshToken', refreshToken);
+      localStorage.setItem('user', JSON.stringify(user));
+      
+      toast.success('Account created successfully!');
+      
+      debug('Registration successful', { user: { ...user, password: undefined } });
+      return response.data;
     } catch (error) {
+      debug('Registration failed:', error);
+      toast.error(error.response?.data?.message || 'Registration failed. Please try again.');
+      throw new Error(error.response?.data?.message || 'Registration failed');
+    }
+  },
+
+  async logout() {
+    try {
+      debug('Attempting logout');
+      await api.post('/auth/logout');
+      localStorage.removeItem('token');
+      // localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      toast.success('Successfully logged out!');
+      debug('Logout successful');
+    } catch (error) {
+      debug('Logout error:', error);
+      toast.error(error.response?.data?.message || 'Failed to logout. Please try again.');
       throw error;
     }
   },
 
-  logout() {
-    localStorage.removeItem('token');
-  },
-
-  getToken() {
-    return localStorage.getItem('token');
+  getCurrentUser() {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user) : null;
   },
 
   isAuthenticated() {
-    return !!this.getToken();
+    return !!localStorage.getItem('token');
   },
+
+  async refreshToken() {
+    try {
+      debug('Attempting token refresh');
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        debug('No refresh token available');
+        throw new Error('No refresh token');
+      }
+
+      const response = await api.post('/auth/refresh-token', { refreshToken });
+      const { token, newRefreshToken } = response.data;
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('refreshToken', newRefreshToken);
+      debug('Token refresh successful');
+      return response.data;
+    } catch (error) {
+      debug('Token refresh failed:', error);
+      this.logout();
+      throw new Error('Token refresh failed');
+    }
+  }
 }; 

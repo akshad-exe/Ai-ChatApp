@@ -16,14 +16,14 @@ import { GoogleIcon, GitHubIcon } from '@/components/social-icons';
 export default function RegisterPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({
-    name: '',
+    username: '',
     email: '',
     password: '',
     confirmPassword: '',
   });
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const setUser = useStore((state) => state.setUser);
+  const [error, setError] = useState('');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -35,20 +35,18 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      const data = await authService.register(formData.name, formData.email, formData.password);
+      const data = await authService.register({
+        email: formData.email,
+        password: formData.password,
+        username: formData.username
+      });
       setUser(data.user);
       router.push('/chat');
     } catch (err) {
+      console.error('Registration failed:', err);
       setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
@@ -81,27 +79,18 @@ export default function RegisterPage() {
               </motion.div>
             </CardHeader>
             <CardContent>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-destructive/15 text-destructive px-4 py-3 rounded-md mb-4"
-                >
-                  {error}
-                </motion.div>
-              )}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm font-medium">
-                    Full Name
+                  <Label htmlFor="username" className="text-sm font-medium">
+                    Username
                   </Label>
                   <Input
-                    id="name"
-                    name="name"
+                    id="username"
+                    name="username"
                     type="text"
                     required
-                    placeholder="John Doe"
-                    value={formData.name}
+                    placeholder="Choose a username"
+                    value={formData.username}
                     onChange={handleChange}
                     className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                   />
@@ -155,7 +144,7 @@ export default function RegisterPage() {
                 </div>
               </form>
             </CardContent>
-            <CardFooter className="flex flex-col gap-4">
+            <CardFooter className="flex flex-col space-y-4">
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white transition-all duration-200"
@@ -194,7 +183,7 @@ export default function RegisterPage() {
                   GitHub
                 </Button>
               </div>
-              <p className="text-center text-sm text-muted-foreground">
+              <p className="text-sm text-center text-muted-foreground">
                 Already have an account?{' '}
                 <Link
                   href="/login"

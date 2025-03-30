@@ -19,7 +19,6 @@ export default function LoginPage() {
     email: '',
     password: '',
   });
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const setUser = useStore((state) => state.setUser);
 
@@ -33,7 +32,6 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
 
     try {
@@ -41,7 +39,7 @@ export default function LoginPage() {
       setUser(data.user);
       router.push('/chat');
     } catch (err) {
-      setError(err.message || 'Login failed');
+      console.error('Login failed:', err);
     } finally {
       setLoading(false);
     }
@@ -73,15 +71,6 @@ export default function LoginPage() {
               </motion.div>
             </CardHeader>
             <CardContent>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-destructive/15 text-destructive px-4 py-3 rounded-md mb-4"
-                >
-                  {error}
-                </motion.div>
-              )}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm font-medium">
@@ -129,7 +118,7 @@ export default function LoginPage() {
                 </div>
               </form>
             </CardContent>
-            <CardFooter className="flex flex-col gap-4">
+            <CardFooter className="flex flex-col space-y-4">
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white transition-all duration-200"
@@ -175,7 +164,7 @@ export default function LoginPage() {
                   GitHub
                 </Button>
               </div>
-              <p className="text-center text-sm text-muted-foreground">
+              <p className="text-sm text-center text-muted-foreground">
                 Don't have an account?{' '}
                 <Link
                   href="/register"

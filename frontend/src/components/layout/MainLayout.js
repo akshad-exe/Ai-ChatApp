@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/services/auth';
 import useStore from '@/store/useStore';
@@ -7,6 +8,23 @@ import useStore from '@/store/useStore';
 export default function MainLayout({ children }) {
   const router = useRouter();
   const { user, logout } = useStore();
+
+  useEffect(() => {
+    // Validate token on component mount and periodically
+    const validateToken = () => {
+      if (!authService.validateToken()) {
+        handleLogout();
+      }
+    };
+
+    // Initial validation
+    validateToken();
+
+    // Set up periodic validation (every 5 minutes)
+    const interval = setInterval(validateToken, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = () => {
     authService.logout();

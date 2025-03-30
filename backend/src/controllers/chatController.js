@@ -1,21 +1,43 @@
 const Chat = require('../models/Chat');
+const Message = require('../models/Message');
 const User = require('../models/User');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { encryptMessage, decryptMessage } = require('../utils/encryption');
+// const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Get all chats for a user
-exports.getChats = async (req, res) => {
+// Get user's chats
+exports.getUserChats = async (req, res) => {
   try {
-    const chats = await Chat.find({ participants: req.user.id })
-      .populate('participants', 'username email avatar')
-      .populate('messages.sender', 'username avatar')
-      .sort({ updatedAt: -1 });
-
+    const { page = 1, limit = 20 } = req.query;
+    const chats = await Chat.getUserChats(req.user._id, parseInt(page), parseInt(limit));
     res.json(chats);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching chats', error: error.message });
+  }
+};
+
+// Get chat messages
+exports.getChatMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+
+    // Verify user is part of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
+    });
+
+    if (!chat) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const messages = await Message.getMessages(chatId, parseInt(page), parseInt(limit));
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching messages', error: error.message });
   }
 };
 
@@ -88,68 +110,138 @@ exports.createChat = async (req, res) => {
 // Send message
 exports.sendMessage = async (req, res) => {
   try {
-    const { chatId, content, type, mediaUrl } = req.body;
+    const { chatId, content, messageType = 'text', fileUrl, fileName, fileSize, fileType } = req.body;
 
-    const chat = await Chat.findById(chatId);
+    // Verify user is part of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
+    });
+
     if (!chat) {
-      return res.status(404).json({ message: 'Chat not found' });
-    }
-
-    // Check if user is a participant
-    if (!chat.participants.includes(req.user.id)) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Add user message
-    const message = {
-      sender: req.user.id,
-      content,
-      type,
-      mediaUrl,
-      isAI: false,
-      readBy: [req.user.id]
-    };
-    chat.messages.push(message);
-    chat.lastMessage = message;
+    // Encrypt message content
+    const encryptedContent = encryptMessage(content);
+
+    // Create message
+    const message = await Message.create({
+      conversationId: chatId,
+      sender: req.user._id,
+      content: encryptedContent,
+      messageType,
+      fileUrl,
+      fileName,
+      fileSize,
+      fileType
+    });
+
+    // Update chat's last message
+    await chat.updateLastMessage(message._id);
+
+    // Populate message with sender info
+    await message.populate('sender', 'username avatar');
+
+    // Get socket service
+    const socketService = req.app.get('socketService');
+
+    // Emit message to chat room
+    socketService.emitMessage(chatId, message);
+
+    // Update unread counts for other participants
+    chat.participants.forEach(participantId => {
+      if (participantId.toString() !== req.user._id.toString()) {
+        const currentCount = chat.unreadCounts.get(participantId.toString()) || 0;
+        chat.unreadCounts.set(participantId.toString(), currentCount + 1);
+      }
+    });
     await chat.save();
 
-    // If it's a group chat, update unread counts for other participants
-    if (chat.isGroup) {
-      chat.participants.forEach(participantId => {
-        if (participantId.toString() !== req.user.id) {
-          const currentCount = chat.unreadCounts.get(participantId.toString()) || 0;
-          chat.unreadCounts.set(participantId.toString(), currentCount + 1);
-        }
-      });
-      await chat.save();
-    }
-
-    // Get AI response if it's a direct chat
-    if (!chat.isGroup) {
-      const aiResponse = await getAIResponse(content);
-      
-      // Add AI message
-      const aiMessage = {
-        sender: null,
-        content: aiResponse,
-        type: 'text',
-        isAI: true,
-        readBy: [req.user.id]
-      };
-      chat.messages.push(aiMessage);
-      chat.lastMessage = aiMessage;
-      await chat.save();
-    }
-
-    // Populate the messages with sender info
-    const populatedChat = await chat.populate([
-      { path: 'participants', select: 'username email avatar' },
-      { path: 'messages.sender', select: 'username avatar' }
-    ]);
-
-    res.json(populatedChat);
+    res.status(201).json(message);
   } catch (error) {
     res.status(500).json({ message: 'Error sending message', error: error.message });
+  }
+};
+
+// Get AI reply
+exports.getAiReply = async (req, res) => {
+  try {
+    const { chatId, messageId } = req.body;
+
+    // Verify user is part of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
+    });
+
+    if (!chat) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Get the original message
+    const originalMessage = await Message.findById(messageId);
+    if (!originalMessage) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Decrypt the original message
+    const decryptedContent = decryptMessage(originalMessage.content);
+
+    // TODO: Implement AI service integration here
+    // For now, return a mock response
+    const aiResponse = "This is a mock AI response. AI integration will be implemented later.";
+
+    // Encrypt AI response
+    const encryptedResponse = encryptMessage(aiResponse);
+
+    // Create AI message
+    const message = await Message.create({
+      conversationId: chatId,
+      sender: process.env.AI_USER_ID, // This should be set in your environment variables
+      content: encryptedResponse,
+      messageType: 'text',
+      replyTo: messageId
+    });
+
+    // Update chat's last message
+    await chat.updateLastMessage(message._id);
+
+    // Populate message with sender info
+    await message.populate('sender', 'username avatar');
+
+    // Get socket service
+    const socketService = req.app.get('socketService');
+
+    // Emit message to chat room
+    socketService.emitMessage(chatId, message);
+
+    res.status(201).json(message);
+  } catch (error) {
+    res.status(500).json({ message: 'Error getting AI reply', error: error.message });
+  }
+};
+
+// Search messages
+exports.searchMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { query } = req.query;
+
+    // Verify user is part of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
+    });
+
+    if (!chat) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const messages = await Message.searchMessages(chatId, query);
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ message: 'Error searching messages', error: error.message });
   }
 };
 
@@ -163,16 +255,26 @@ exports.markAsRead = async (req, res) => {
       return res.status(404).json({ message: 'Chat not found' });
     }
 
+    // Get socket service
+    const socketService = req.app.get('socketService');
+
     // Update read status for all messages
     chat.messages.forEach(message => {
-      if (!message.readBy.includes(req.user.id)) {
-        message.readBy.push(req.user.id);
+      if (!message.readBy.includes(req.user._id)) {
+        message.readBy.push(req.user._id);
       }
     });
 
     // Reset unread count for current user
-    chat.unreadCounts.set(req.user.id.toString(), 0);
+    chat.unreadCounts.set(req.user._id.toString(), 0);
     await chat.save();
+
+    // Emit message read status to chat room
+    socketService.emitToChat(chatId, 'messagesRead', {
+      chatId,
+      userId: req.user._id,
+      username: req.user.username
+    });
 
     res.json({ message: 'Messages marked as read' });
   } catch (error) {

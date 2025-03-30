@@ -3,91 +3,165 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const http = require('http');
 const socketIo = require('socket.io');
-const dotenv = require('dotenv');
-
-// Import middleware
-const auth = require('./middleware/auth');
-const errorHandler = require('./middleware/errorHandler');
-const validate = require('./middleware/validate');
-const limiter = require('./middleware/rateLimiter');
+const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const compression = require('compression');
+const morgan = require('morgan');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const userRoutes = require('./routes/userRoutes');
+
+// Import middleware
+const errorHandler = require('./middleware/errorHandler');
+const auth = require('./middleware/auth');
+const { apiLimiter, authLimiter } = require('./middleware/rateLimiter');
+
+// Import socket service
+const SocketService = require('./services/socketService');
 
 // Load environment variables
-dotenv.config();
+require('dotenv').config();
 
-// Create Express app
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? 'https://your-production-domain.com' 
-      : 'http://localhost:5173',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
     methods: ['GET', 'POST']
   }
 });
 
-// Basic middleware
-app.use(cors());
+// Initialize socket service
+const socketService = new SocketService(io);
+
+// Make socket service available to routes
+app.set('socketService', socketService);
+
+// Database connection
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('MongoDB connection error:', err));
+
+// Security middleware (should be first)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", process.env.FRONTEND_URL || 'http://localhost:3000'],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 600 // 10 minutes
+}));
+
+// Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
-// Rate limiting
-app.use(limiter);
+// Compression middleware
+app.use(compression());
 
-// MongoDB Connection
-const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error('MongoDB connection error:', error);
-    process.exit(1);
-  }
-};
+// Logging middleware
+app.use(morgan('dev'));
 
-// Connect to MongoDB
-connectDB();
+// Rate limiting middleware
+app.use('/api/auth', authLimiter);
+app.use('/api', apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/chats', chatRoutes);
-
-// Public routes
-app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to AI Chat App API' });
-});
-
-// Protected routes example
-app.get('/api/protected', auth, (req, res) => {
-  res.json({ message: 'This is a protected route', user: req.user });
-});
+app.use('/api/chat', auth, chatRoutes);
+app.use('/api/users', auth, userRoutes);
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('New client connected');
 
-  socket.on('join', (userId) => {
-    socket.join(userId);
-    console.log(`User ${userId} joined their room`);
+  // Authenticate socket connection
+  socket.on('authenticate', async (token) => {
+    try {
+      const decoded = await auth.verifyToken(token);
+      socket.userId = decoded.userId;
+      console.log(`User ${decoded.userId} authenticated on socket`);
+    } catch (error) {
+      console.error('Socket authentication error:', error);
+      socket.disconnect();
+    }
   });
 
+  // Join chat room
+  socket.on('joinRoom', ({ conversationId }) => {
+    if (socket.userId) {
+      socket.join(conversationId);
+      console.log(`User ${socket.userId} joined room ${conversationId}`);
+    }
+  });
+
+  // Leave chat room
+  socket.on('leaveRoom', ({ conversationId }) => {
+    if (socket.userId) {
+      socket.leave(conversationId);
+      console.log(`User ${socket.userId} left room ${conversationId}`);
+    }
+  });
+
+  // Handle messages
+  socket.on('message', async (message) => {
+    if (socket.userId) {
+      try {
+        // Save message to database
+        const savedMessage = await Message.create({
+          ...message,
+          sender: socket.userId
+        });
+
+        // Broadcast to room
+        io.to(message.conversationId).emit('message', savedMessage);
+      } catch (error) {
+        console.error('Error handling message:', error);
+        socket.emit('error', { message: 'Failed to send message' });
+      }
+    }
+  });
+
+  // Handle typing indicators
+  socket.on('typing', (data) => {
+    if (socket.userId) {
+      socket.to(data.conversationId).emit('typing', {
+        userId: socket.userId,
+        isTyping: data.isTyping
+      });
+    }
+  });
+
+  // Handle disconnection
   socket.on('disconnect', () => {
     console.log('Client disconnected');
   });
 });
 
-// Error handling middleware
+// Error handling
 app.use(errorHandler);
 
 // Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 }); 

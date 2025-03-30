@@ -13,4 +13,9 @@ router.post('/login', loginValidator, validate, authController.login);
 router.get('/verify-token', auth, authController.verifyToken);
 router.post('/logout', auth, authController.logout);
 
+// Test protected route
+router.get('/me', auth, (req, res) => {
+  res.json({ user: req.user });
+});
+
 module.exports = router; 
