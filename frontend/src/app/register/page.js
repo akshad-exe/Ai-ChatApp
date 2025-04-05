@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { authService } from '@/services/auth';
+import axios from 'axios';
 import useStore from '@/store/useStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,6 @@ import { User, Mail, Lock, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { GoogleIcon, GitHubIcon } from '@/components/social-icons';
 import { API_ENDPOINTS } from '@/config/api';
-
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -26,6 +25,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const setUser = useStore((state) => state.setUser);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -38,18 +38,40 @@ export default function RegisterPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
+    setSuccess('');
 
-    try {
-      const data = await authService.register({
-        email: formData.email,
+    // Validate passwords match
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+      try {
+      // Create the registration data object
+      const registrationData = {
+        email: formData.email.trim(),
         password: formData.password,
         username: formData.username
-      });
-      setUser(data.user);
-      router.push('/chat');
+      };
+    
+
+      const response = await axios.post(API_ENDPOINTS.auth.register, registrationData);
+      
+      if (response.data && response.data.user) {
+        setSuccess('Registration successful! Redirecting to login...');
+        
+        // Wait for 2 seconds to show the success message
+        setTimeout(() => {
+          router.push('/login');
+        }, 2000);
+      } else {
+        throw new Error('Invalid response from server');
+      }
+      
     } catch (err) {
       console.error('Registration failed:', err);
-      setError(err.message || 'Registration failed');
+      setError(err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -82,6 +104,16 @@ export default function RegisterPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
+                    {error}
+                  </div>
+                )}
+                {success && (
+                  <div className="p-3 text-sm text-green-500 bg-green-50 rounded-md">
+                    {success}
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="username" className="text-sm font-medium">
                     Username
@@ -144,17 +176,23 @@ export default function RegisterPage() {
                     className="transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white transition-all duration-200"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating account...
+                    </>
+                  ) : (
+                    'Create account'
+                  )}
+                </Button>
               </form>
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
-              <Button
-                type="submit"
-                className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white transition-all duration-200"
-                disabled={loading}
-                onClick={handleSubmit}
-              >
-                {loading ? 'Creating account...' : 'Create account'}
-              </Button>
               <div className="relative w-full">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />

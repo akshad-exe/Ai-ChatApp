@@ -54,7 +54,7 @@ export default function ResetPassword() {
 
     try {
       const token = searchParams.get('token');
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/reset-password`, {
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/auth/reset-password`, {
         token,
         password
       });

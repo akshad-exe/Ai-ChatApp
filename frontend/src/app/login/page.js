@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { authService } from '@/services/auth';
 import useStore from '@/store/useStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,19 +30,30 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    console.log('Starting login process with credentials:', {
+      email: credentials.email,
+      hasPassword: !!credentials.password
+    });
+
     try {
-      const result = await login(credentials);
+      console.log('Calling login function');
+      const result = await login(credentials.email, credentials.password);
+      console.log('Login result:', result);
+      
       if (result.success) {
-        console.log('Login successful, redirecting to chat...'); // Debug log
+        console.log('Login successful, redirecting to chat...');
         setUser(result.user);
         router.push('/chat');
       } else {
-        setError(result.error || 'Login failed');
-        console.error('Login failed:', result.error); // Debug log
+        console.error('Login failed with error:', result.error);
+        setError(result.error || 'Login failed. Please try again.');
       }
     } catch (error) {
-      console.error('Login error:', error); // Debug log
-      setError('An error occurred during login');
+      console.error('Login process error:', {
+        message: error.message,
+        stack: error.stack
+      });
+      setError(error.message || 'An unexpected error occurred during login');
     } finally {
       setLoading(false);
     }

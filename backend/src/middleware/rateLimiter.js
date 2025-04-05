@@ -1,23 +1,36 @@
 const rateLimit = require('express-rate-limit');
 
-const createRateLimiter = (windowMs, max) => {
-  return rateLimit({
-    windowMs: windowMs || 15 * 60 * 1000, // 15 minutes
-    max: max || 100, // limit each IP to 100 requests per windowMs
-    message: {
-      message: 'Too many requests from this IP, please try again later.'
-    },
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  });
-};
+// General API rate limiter
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
 
-// Specific limiters for different routes
-const authLimiter = createRateLimiter(15 * 60 * 1000, 5); // 5 requests per 15 minutes for auth routes
-const apiLimiter = createRateLimiter(15 * 60 * 1000, 100); // 100 requests per 15 minutes for API routes
+// Auth routes rate limiter (login, register)
+const authLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 50, // Limit each IP to 5 requests per windowMs
+  message: 'Too many authentication attempts, please try again later.'
+});
+
+// Password reset rate limiter
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // Limit each IP to 3 password reset attempts per hour
+  message: 'Too many password reset attempts, please try again later.'
+});
+
+// Chat routes rate limiter
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // Limit each IP to 30 chat requests per minute
+  message: 'Too many chat requests, please try again later.'
+});
 
 module.exports = {
-  createRateLimiter,
+  apiLimiter,
   authLimiter,
-  apiLimiter
+  passwordResetLimiter,
+  chatLimiter
 }; 

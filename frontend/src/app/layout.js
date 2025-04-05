@@ -3,6 +3,7 @@ import "./globals.css";
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ChatProvider } from '@/contexts/ChatContext';
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -26,7 +27,9 @@ export default function RootLayout({ children }) {
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <AuthProvider>
-          {children}
+          <ChatProvider>
+            {children}
+          </ChatProvider>
         </AuthProvider>
         <ToastContainer
           position="top-right"

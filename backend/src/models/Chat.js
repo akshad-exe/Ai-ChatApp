@@ -6,81 +6,76 @@ const chatSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   }],
+  lastMessage: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message'
+  },
+  lastMessageTime: {
+    type: Date,
+    default: Date.now
+  },
   isGroupChat: {
     type: Boolean,
     default: false
   },
   groupName: {
     type: String,
-    default: null
-  },
-  groupAvatar: {
-    type: String,
-    default: null
+    trim: true
   },
   groupAdmin: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
+    ref: 'User'
   },
-  lastMessage: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Message',
-    default: null
-  },
-  lastMessageTime: {
-    type: Date,
-    default: Date.now
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  metadata: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: {}
+  unreadCounts: [{
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    count: {
+      type: Number,
+      default: 0
+    }
+  }],
+  settings: {
+    notifications: {
+      type: Boolean,
+      default: true
+    },
+    encryption: {
+      type: Boolean,
+      default: true
+    }
   }
 }, {
   timestamps: true
 });
 
-// Indexes for better query performance
+// Index for faster queries
 chatSchema.index({ participants: 1 });
 chatSchema.index({ lastMessageTime: -1 });
 
-// Virtual populate for messages
-chatSchema.virtual('messages', {
-  ref: 'Message',
-  localField: '_id',
-  foreignField: 'conversationId'
-});
-
-// Method to get chat participants
-chatSchema.methods.getParticipants = async function() {
-  return this.populate('participants', 'username avatar status');
+// Method to get chat with populated fields
+chatSchema.methods.getChatDetails = async function() {
+  return this.populate([
+    { path: 'participants', select: 'username email avatar isOnline lastSeen' },
+    { path: 'lastMessage' },
+    { path: 'groupAdmin', select: 'username email avatar' }
+  ]);
 };
 
-// Method to update last message
-chatSchema.methods.updateLastMessage = async function(messageId) {
-  this.lastMessage = messageId;
-  this.lastMessageTime = new Date();
-  await this.save();
-};
-
-// Static method to find or create chat between two users
+// Static method to find or create a chat between two users
 chatSchema.statics.findOrCreateChat = async function(user1Id, user2Id) {
   let chat = await this.findOne({
     participants: { $all: [user1Id, user2Id] },
     isGroupChat: false
-  }).populate('participants', 'username avatar');
+  }).populate('participants', 'username email avatar isOnline lastSeen');
 
   if (!chat) {
     chat = await this.create({
       participants: [user1Id, user2Id],
       isGroupChat: false
     });
-    chat = await chat.populate('participants', 'username avatar');
+    chat = await chat.getChatDetails();
   }
 
   return chat;

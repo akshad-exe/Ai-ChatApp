@@ -2,20 +2,39 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export const API_ENDPOINTS = {
   auth: {
-    register: `${API_URL}/api/auth/register`,
-    login: `${API_URL}/api/auth/login`,
-    forgotPassword: `${API_URL}/api/auth/forgot-password`,
-    resetPassword: `${API_URL}/api/auth/reset-password`,
-    verifyResetToken: `${API_URL}/api/auth/verify-reset-token`,
-    verifyToken: `${API_URL}/api/auth/verify-token`,
-    logout: `${API_URL}/api/auth/logout`
+    register: `${API_URL}/auth/register`,
+    login: `${API_URL}/auth/login`,
+    forgotPassword: `${API_URL}/auth/forgot-password`,
+    resetPassword: `${API_URL}/auth/reset-password`,
+    verifyResetToken: `${API_URL}/auth/verify-reset-token`,
+    verifyToken: `${API_URL}/auth/verify-token`,
+    logout: `${API_URL}/auth/logout`
   },
   chat: {
-    conversations: `${API_URL}/api/chat/conversations`,
-    messages: `${API_URL}/api/chat/messages`
+    // Chat management
+    getChats: `${API_URL}/chat`,
+    getChat: (chatId) => `${API_URL}/chat/${chatId}`,
+    createChat: `${API_URL}/chat/create`,
+    createGroupChat: `${API_URL}/chat/create-group`,
+    
+    // Message management
+    getMessages: (chatId) => `${API_URL}/chat/${chatId}/messages`,
+    searchMessages: (chatId) => `${API_URL}/chat/${chatId}/search`,
+    sendMessage: (chatId) => `${API_URL}/chat/${chatId}/send`,
+    markAsRead: (chatId) => `${API_URL}/chat/${chatId}/messages/read`,
+    getAIResponse: (chatId) => `${API_URL}/chat/${chatId}/ai-reply`,
+    
+    // Chat settings
+    updateSettings: (chatId) => `${API_URL}/chat/${chatId}/settings`
   },
   users: {
-    profile: `${API_URL}/api/users/profile`,
-    updateProfile: `${API_URL}/api/users/profile/update`
+    // Profile management
+    getProfile: `${API_URL}/users/profile`,
+    updateProfile: `${API_URL}/users/profile`,
+    updatePassword: `${API_URL}/users/password`,
+    
+    // User search and details
+    searchUsers: `${API_URL}/users/search`,
+    getUserById: (userId) => `${API_URL}/users/${userId}`
   }
 }; 

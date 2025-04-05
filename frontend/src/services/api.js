@@ -8,6 +8,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
+  withCredentials: true,
 });
 
 // Debug logging
@@ -20,17 +21,11 @@ const debug = (message, data = null) => {
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
     debug('Making request:', {
       url: config.url,
       method: config.method,
-      baseURL: config.baseURL,
-      hasToken: !!token
+      baseURL: config.baseURL
     });
-    
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
     return config;
   },
   (error) => {
@@ -54,31 +49,20 @@ api.interceptors.response.use(
       status: error.response?.status,
       message: error.message
     });
-
-    if (error.response) {
-      const errorMessage = error.response.data?.message || 'An error occurred';
-      debug('Error response:', {
-        status: error.response.status,
-        message: errorMessage
-      });
-
-      switch (error.response.status) {
-        case 404:
-          return Promise.reject(new Error('Resource not found'));
-        case 500:
-          return Promise.reject(new Error('Server error'));
-        default:
-          return Promise.reject(new Error(errorMessage));
+    
+    // Handle authentication errors
+    if (error.response?.status === 401) {
+      debug('Authentication error');
+      localStorage.removeItem('user');
+      
+      // Redirect to login page if not already there
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
     }
-
-    if (error.request) {
-      debug('Network error:', error.request);
-      return Promise.reject(new Error('Network error - Please check your connection'));
-    }
-
+    
     return Promise.reject(error);
   }
 );
 
-export default api; 
+export { api };

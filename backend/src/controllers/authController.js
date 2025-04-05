@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 const { validationResult } = require('express-validator');
-const { sendPasswordResetEmail } = require('../utils/email');
+const { generateResetUrl } = require('../utils/email');
 
 // Generate JWT Token
 const generateToken = (userId) => {
@@ -23,34 +23,48 @@ exports.register = async (req, res) => {
     }
 
     const { username, email, password } = req.body;
+    console.log('Registration attempt for:', { username, email });
+    console.log('Registration password:', password);
 
     // Check if user already exists
-    let user = await User.findOne({ $or: [{ email }, { username }] });
-    if (user) {
+    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+    if (existingUser) {
       return res.status(400).json({
-        message: user.email === email ? 'Email already registered' : 'Username already taken'
+        message: existingUser.email === email ? 'Email already registered.' : 'Username already taken.'
       });
     }
 
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    console.log('Registration - Password hashed successfully');
+    console.log('Registration - Salt used:', salt);
+    console.log('Registration - Generated hash:', hashedPassword);
 
-    // Create new user
-    user = new User({
+    // Create user
+    const user = new User({
       username,
       email,
       password: hashedPassword
     });
 
     await user.save();
+    console.log('User registered successfully');
 
-    // Generate token
+    // Generate JWT token
     const token = generateToken(user._id);
 
+    // Set token in HTTP-only cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    // Return user data (excluding password)
     res.status(201).json({
-      message: 'User registered successfully',
-      token,
+      message: 'Registration successful',
       user: {
         id: user._id,
         username: user.username,
@@ -59,7 +73,7 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'An error occurred during registration.' });
   }
 };
 
@@ -67,45 +81,51 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log('Login attempt for email:', email);
+    console.log('Login - Received password:', password);
 
-    // Check if user exists
+    // Find user
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      console.log('User not found');
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
+
+    console.log('Login - Found user with hash:', user.password);
 
     // Verify password
     const isMatch = await bcrypt.compare(password, user.password);
+    console.log('Login - Password match:', isMatch);
+    console.log('Login - Attempting to compare password with hash');
+
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      console.log('Login - Invalid password');
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    // Update online status
-    user.isOnline = true;
-    user.lastSeen = new Date();
-    await user.save();
+    // Generate JWT token
+    const token = generateToken(user._id);
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    // Set token in HTTP-only cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
 
-    // Return user data without sensitive information
-    const userData = {
-      id: user._id,
-      email: user.email,
-      name: user.name || user.email.split('@')[0]
-    };
-
+    // Return user data (excluding password)
     res.json({
-      token,
-      user: userData
+      message: 'Login successful',
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email
+      }
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'An error occurred during login.' });
   }
 };
 
@@ -113,38 +133,50 @@ exports.login = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    console.log('Forgot password request for:', email);
+    console.log('Password reset request for:', email);
 
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(404).json({ message: 'No account found with this email address.' });
+      // Return the same message for both existing and non-existing emails
+      // to prevent email enumeration
+      return res.json({ 
+        message: 'If an account exists, a password reset link will be generated.' 
+      });
     }
 
-    // Generate reset token
+    // Check if there's already a valid reset token
+    if (user.resetPasswordToken && user.resetPasswordExpires > Date.now()) {
+      return res.status(429).json({ 
+        message: 'A reset link has already been generated. Please wait before requesting another.' 
+      });
+    }
+
+    // Generate a cryptographically secure random token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenExpiry = Date.now() + 3600000; // 1 hour from now
 
-    // Update only the reset token fields
+    // Hash the reset token before storing
+    const hashedResetToken = crypto
+      .createHash('sha256')
+      .update(resetToken)
+      .digest('hex');
+
+    // Update user with hashed token
     await User.findByIdAndUpdate(user._id, {
-      resetPasswordToken: resetToken,
+      resetPasswordToken: hashedResetToken,
       resetPasswordExpires: resetTokenExpiry
     });
 
-    try {
-      // Send reset email
-      await sendPasswordResetEmail(email, resetToken);
-      res.json({ message: 'Password reset instructions have been sent to your email.' });
-    } catch (emailError) {
-      console.error('Failed to send reset email:', emailError);
-      // Still return success but with a warning
-      res.json({ 
-        message: 'Password reset token generated but email could not be sent. Please contact support.',
-        warning: 'Email delivery failed'
-      });
-    }
+    // Get the reset URL
+    const { resetUrl } = await generateResetUrl(email, resetToken);
+    
+    res.json({ 
+      message: 'If an account exists, a reset link will be generated.',
+      resetUrl
+    });
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('Password reset error:', error);
     res.status(500).json({ message: 'An error occurred while processing your request.' });
   }
 };
@@ -154,8 +186,14 @@ exports.verifyResetToken = async (req, res) => {
   try {
     const { token } = req.query;
 
+    // Hash the provided token to match stored hash
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
     const user = await User.findOne({
-      resetPasswordToken: token,
+      resetPasswordToken: hashedToken,
       resetPasswordExpires: { $gt: Date.now() }
     });
 
@@ -174,24 +212,56 @@ exports.verifyResetToken = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { token, password } = req.body;
+    console.log('Reset password attempt with token');
+    console.log('New password to be set:', password);
+
+    // Hash the provided token to match stored hash
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
 
     const user = await User.findOne({
-      resetPasswordToken: token,
+      resetPasswordToken: hashedToken,
       resetPasswordExpires: { $gt: Date.now() }
     });
 
     if (!user) {
+      console.log('Invalid or expired reset token');
       return res.status(400).json({ message: 'Invalid or expired reset token.' });
     }
 
     // Hash new password
     const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    console.log('New password hashed successfully');
+    console.log('Password hash:', hashedPassword);
+    console.log('Salt used:', salt);
 
-    // Clear reset token fields
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
+    // Update user password using findByIdAndUpdate to ensure atomic operation
+    const updatedUser = await User.findByIdAndUpdate(
+      user._id,
+      {
+        $set: {
+          password: hashedPassword,
+          resetPasswordToken: undefined,
+          resetPasswordExpires: undefined
+        }
+      },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      console.log('Failed to update user password');
+      return res.status(500).json({ message: 'Failed to update password.' });
+    }
+
+    console.log('Password reset successful for user:', updatedUser.email);
+    console.log('Updated password hash:', updatedUser.password);
+    
+    // Verify the password was updated correctly
+    const isMatch = await bcrypt.compare(password, updatedUser.password);
+    console.log('Verification - Password matches new hash:', isMatch);
 
     res.json({ message: 'Password has been reset successfully.' });
   } catch (error) {

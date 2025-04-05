@@ -1,110 +1,132 @@
-import api from './api';
+import { api } from './api';
+import { API_ENDPOINTS } from '@/config/api';
 
 export const chatService = {
-  // Chat operations
-  async createChat(participants) {
+  // Get all chats for the current user
+  getChats: async () => {
     try {
-      const response = await api.post('/chat', { participants });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to create chat');
-    }
-  },
-
-  async getChats() {
-    try {
-      const response = await api.get('/chat');
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to fetch chats');
-    }
-  },
-
-  async getChat(chatId) {
-    try {
-      const response = await api.get(`/chat/${chatId}`);
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to fetch chat');
-    }
-  },
-
-  async getMessages(chatId, page = 1, limit = 50) {
-    try {
-      const response = await api.get(`/chat/${chatId}/messages`, {
-        params: { page, limit }
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to fetch messages');
-    }
-  },
-
-  async sendMessage(chatId, content, type = 'text', mediaUrl = null) {
-    try {
-      const response = await api.post(`/chat/${chatId}/messages`, {
-        content,
-        type,
-        mediaUrl
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to send message');
-    }
-  },
-
-  async updateChat(chatId, updates) {
-    try {
-      const response = await api.put(`/chat/${chatId}`, updates);
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to update chat');
-    }
-  },
-
-  async deleteChat(chatId) {
-    try {
-      await api.delete(`/chat/${chatId}`);
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to delete chat');
-    }
-  },
-
-  // Message operations
-  async markMessagesAsRead(chatId, messageIds) {
-    try {
-      const response = await api.put(`/chat/${chatId}/messages/read`, {
-        messageIds
-      });
-      return response.data;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to mark messages as read');
-    }
-  },
-
-  async deleteMessage(chatId, messageId) {
-    try {
-      await api.delete(`/chat/${chatId}/messages/${messageId}`);
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to delete message');
-    }
-  },
-
-  // Media operations
-  async uploadMedia(file, type) {
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('type', type);
-
-      const response = await api.post('/chat/upload', formData, {
+      const response = await fetch(API_ENDPOINTS.chat.getChats, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'multipart/form-data'
-        }
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include'
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch chats');
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching chats:', error);
+      throw error;
+    }
+  },
+
+  // Get messages for a specific chat
+  getMessages: async (chatId) => {
+    try {
+      const response = await api.get(API_ENDPOINTS.chat.getMessages(chatId));
+      return response;
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      throw error;
+    }
+  },
+
+  // Send a message in a chat
+  sendMessage: async (chatId, message) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.chat.sendMessage(chatId), message);
+      return response;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      throw error;
+    }
+  },
+
+  // Create a new chat (both direct and group)
+  createChat: async (data) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.chat.createChat, data);
+      return response;
+    } catch (error) {
+      console.error('Error creating chat:', error);
+      throw error;
+    }
+  },
+
+  // Create a group chat
+  createGroupChat: async (name, userIds) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.chat.createGroupChat, {
+        name,
+        participants: userIds
+      });
+      return response;
+    } catch (error) {
+      console.error('Error creating group chat:', error);
+      throw error;
+    }
+  },
+
+  // Add participants to a group chat
+  addParticipants: async (chatId, userIds) => {
+    try {
+      const response = await api.post(`${API_ENDPOINTS.chat.getChat(chatId)}/participants`, {
+        participants: userIds
+      });
+      return response;
+    } catch (error) {
+      console.error('Error adding participants:', error);
+      throw error;
+    }
+  },
+
+  // Remove a participant from a group chat
+  removeParticipant: async (chatId, userId) => {
+    try {
+      const response = await api.delete(`${API_ENDPOINTS.chat.getChat(chatId)}/participants/${userId}`);
+      return response;
+    } catch (error) {
+      console.error('Error removing participant:', error);
+      throw error;
+    }
+  },
+
+  // Leave a group chat
+  leaveGroupChat: async (chatId) => {
+    try {
+      const response = await api.post(`${API_ENDPOINTS.chat.getChat(chatId)}/leave`);
+      return response;
+    } catch (error) {
+      console.error('Error leaving group chat:', error);
+      throw error;
+    }
+  },
+
+  // Delete a chat
+  deleteChat: async (chatId) => {
+    try {
+      const response = await api.delete(API_ENDPOINTS.chat.getChat(chatId));
+      return response;
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+      throw error;
+    }
+  },
+
+  // Get AI response for a message
+  getAIResponse: async (chatId, message) => {
+    try {
+      const response = await api.post(API_ENDPOINTS.chat.getAIResponse(chatId), { message });
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.message || 'Failed to upload media');
+      console.error('Error getting AI response:', error);
+      throw error;
     }
   }
-}; 
+};

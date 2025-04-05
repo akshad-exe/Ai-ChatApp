@@ -3,6 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { authService } from '@/services/auth';
 
 export default function MainLayout({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -45,8 +46,12 @@ export default function MainLayout({ children }) {
               </button>
               <button
                 onClick={() => {
-                  localStorage.removeItem('token');
-                  router.push('/login');
+                  authService.logout().then(() => {
+                    router.push('/login');
+                  }).catch(error => {
+                    console.error('Logout error:', error);
+                    router.push('/login');
+                  });
                 }}
                 className="ml-4 px-4 py-2 text-sm font-medium text-red-600 hover:text-red-800"
               >

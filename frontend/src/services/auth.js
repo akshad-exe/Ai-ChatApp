@@ -1,4 +1,4 @@
-import api from './api';
+import { API_ENDPOINTS } from '@/config/api';
 import { toast } from 'react-toastify';
 
 // Debug logging
@@ -11,60 +11,111 @@ const debug = (message, data = {}) => {
 export const authService = {
   async login(email, password) {
     try {
-      debug('Attempting login', { email });
-      const response = await api.post('/auth/login', { email, password });
-      const { token, refreshToken, user } = response.data;
+      debug('Starting login process', { email });
       
-      // Store tokens in localStorage
-      localStorage.setItem('token', token);
-      localStorage.setItem('refreshToken', refreshToken);
-      localStorage.setItem('user', JSON.stringify(user));
+      if (!email || !password) {
+        debug('Missing credentials', { hasEmail: !!email, hasPassword: !!password });
+        throw new Error('Email and password are required');
+      }
+
+      debug('Sending login request to server');
+      const response = await fetch(API_ENDPOINTS.auth.login, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          email,
+          password
+        })
+      });
+
+      debug('Received response from server', { 
+        status: response.status,
+        ok: response.ok
+      });
+
+      const data = await response.json();
+      debug('Response data:', data);
       
-      toast.success('Successfully logged in!');
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
+
+      if (!data.user) {
+        debug('Invalid response format - missing user', data);
+        throw new Error('Invalid response format from server');
+      }
+
+      // Store user data only
+      debug('Storing user data');
+      localStorage.setItem('user', JSON.stringify(data.user));
       
-      debug('Login successful', { user: { ...user, password: undefined } });
-      return response.data;
+      debug('Login successful', { user: { ...data.user, password: undefined } });
+      return { success: true, user: data.user };
     } catch (error) {
-      debug('Login failed:', error);
-      toast.error(error.response?.data?.message || 'Failed to login. Please try again.');
-      throw new Error(error.response?.data?.message || 'Login failed');
+      debug('Login failed with error:', error);
+      toast.error(error.message || 'Failed to login. Please try again.');
+      return { 
+        success: false, 
+        error: error.message || 'Login failed' 
+      };
     }
   },
 
   async register(userData) {
     try {
       debug('Attempting registration', { ...userData, password: undefined });
-      const response = await api.post('/auth/register', userData);
-      const { token, refreshToken, user } = response.data;
+      const response = await fetch(API_ENDPOINTS.auth.register, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify(userData)
+      });
+
+      if (!response.ok) {
+        throw new Error('Registration failed');
+      }
+
+      const data = await response.json();
+      const { user } = data;
       
-      // Store tokens in localStorage
-      localStorage.setItem('token', token);
-      localStorage.setItem('refreshToken', refreshToken);
+      // Store user data in localStorage
       localStorage.setItem('user', JSON.stringify(user));
       
       toast.success('Account created successfully!');
       
       debug('Registration successful', { user: { ...user, password: undefined } });
-      return response.data;
+      return data;
     } catch (error) {
       debug('Registration failed:', error);
-      toast.error(error.response?.data?.message || 'Registration failed. Please try again.');
-      throw new Error(error.response?.data?.message || 'Registration failed');
+      toast.error(error.message || 'Registration failed. Please try again.');
+      throw error;
     }
   },
 
   async logout() {
     try {
       debug('Attempting logout');
-      await api.post('/auth/logout');
-      localStorage.removeItem('token');
-      // localStorage.removeItem('refreshToken');
+      await fetch(API_ENDPOINTS.auth.logout, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include'
+      });
       localStorage.removeItem('user');
       toast.success('Successfully logged out!');
       debug('Logout successful');
     } catch (error) {
       debug('Logout error:', error);
-      toast.error(error.response?.data?.message || 'Failed to logout. Please try again.');
+      toast.error(error.message || 'Failed to logout. Please try again.');
       throw error;
     }
   },
@@ -75,25 +126,69 @@ export const authService = {
   },
 
   isAuthenticated() {
-    return !!localStorage.getItem('token');
+    return !!localStorage.getItem('user');
+  },
+
+  async verifyToken() {
+    try {
+      debug('Verifying token');
+      
+      const response = await fetch(API_ENDPOINTS.auth.verifyToken, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include'
+      });
+
+      debug('Token verification response', { 
+        status: response.status,
+        ok: response.ok
+      });
+
+      if (!response.ok) {
+        debug('Token verification failed', { status: response.status });
+        localStorage.removeItem('user');
+        return { success: false, message: 'Token verification failed' };
+      }
+
+      const data = await response.json();
+      debug('Token verification successful', { user: { ...data.user, password: undefined } });
+      
+      // Update user data in localStorage
+      if (data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+      }
+      
+      return { success: true, user: data.user };
+    } catch (error) {
+      debug('Token verification error:', error);
+      localStorage.removeItem('user');
+      return { success: false, message: 'Token verification error' };
+    }
   },
 
   async refreshToken() {
     try {
       debug('Attempting token refresh');
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        debug('No refresh token available');
-        throw new Error('No refresh token');
+      
+      const response = await fetch(API_ENDPOINTS.auth.refreshToken, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error('Token refresh failed');
       }
 
-      const response = await api.post('/auth/refresh-token', { refreshToken });
-      const { token, newRefreshToken } = response.data;
-
-      localStorage.setItem('token', token);
-      localStorage.setItem('refreshToken', newRefreshToken);
+      const data = await response.json();
       debug('Token refresh successful');
-      return response.data;
+      return data;
     } catch (error) {
       debug('Token refresh failed:', error);
       this.logout();

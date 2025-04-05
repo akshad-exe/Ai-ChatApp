@@ -1,3 +1,6 @@
+// Load environment variables first
+
+require('dotenv').config({ path: './src/.env' });
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -8,7 +11,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
-const dotenv = require('dotenv');
+
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -22,19 +25,12 @@ const { apiLimiter, authLimiter } = require('./middleware/rateLimiter');
 
 // Import socket service
 const SocketService = require('./services/socketService');
+const { initializeSocket } = require('./config/socket');
 
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    credentials: true,
-    methods: ['GET', 'POST']
-  }
-});
+const io = initializeSocket(server);
 
 // Initialize socket service
 const socketService = new SocketService(io);
@@ -90,6 +86,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
 app.use('/api/users', authMiddleware, userRoutes);
+app.use('/api/chats', require('./routes/chatRoutes'));
 
 // Socket.io connection handling
 io.on('connection', (socket) => {

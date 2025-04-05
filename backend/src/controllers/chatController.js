@@ -2,24 +2,29 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const { encryptMessage, decryptMessage } = require('../utils/encryption');
+const { getIO } = require('../config/socket');
 // const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Initialize Gemini AI
 // const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Get user's chats
-exports.getUserChats = async (req, res) => {
+// Get all chats for a user
+exports.getChats = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const chats = await Chat.getUserChats(req.user._id, parseInt(page), parseInt(limit));
+    const chats = await Chat.find({ participants: req.user._id })
+      .populate('participants', 'username email avatar isOnline lastSeen')
+      .populate('lastMessage')
+      .sort({ lastMessageTime: -1 });
+
     res.json(chats);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching chats', error: error.message });
+    console.error('Error fetching chats:', error);
+    res.status(500).json({ message: 'Error fetching chats' });
   }
 };
 
-// Get chat messages
-exports.getChatMessages = async (req, res) => {
+// Get messages for a specific chat
+exports.getMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const { page = 1, limit = 50 } = req.query;
@@ -31,13 +36,39 @@ exports.getChatMessages = async (req, res) => {
     });
 
     if (!chat) {
-      return res.status(403).json({ message: 'Access denied' });
+      return res.status(403).json({ message: 'Not authorized to access this chat' });
     }
 
-    const messages = await Message.getMessages(chatId, parseInt(page), parseInt(limit));
+    const messages = await Message.find({ chat: chatId })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .populate('sender', 'username email avatar')
+      .populate('readBy.user', 'username email avatar');
+
+    // Mark messages as read
+    await Message.updateMany(
+      {
+        chat: chatId,
+        sender: { $ne: req.user._id },
+        'readBy.user': { $ne: req.user._id }
+      },
+      { $push: { readBy: { user: req.user._id } } }
+    );
+
+    // Reset unread count for this chat
+    const unreadCount = chat.unreadCounts.find(
+      count => count.user.toString() === req.user._id.toString()
+    );
+    if (unreadCount) {
+      unreadCount.count = 0;
+      await chat.save();
+    }
+
     res.json(messages);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching messages', error: error.message });
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ message: 'Error fetching messages' });
   }
 };
 
@@ -45,65 +76,99 @@ exports.getChatMessages = async (req, res) => {
 exports.getChat = async (req, res) => {
   try {
     const chat = await Chat.findById(req.params.chatId)
-      .populate('participants', 'username email avatar')
-      .populate('messages.sender', 'username avatar');
+      .populate('participants', 'username email avatar isOnline lastSeen')
+      .populate('lastMessage');
 
     if (!chat) {
       return res.status(404).json({ message: 'Chat not found' });
     }
 
     // Check if user is a participant
-    if (!chat.participants.some(p => p._id.toString() === req.user.id)) {
+    if (!chat.participants.some(p => p._id.toString() === req.user._id.toString())) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
     res.json(chat);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching chat', error: error.message });
+    console.error('Error fetching chat:', error);
+    res.status(500).json({ message: 'Error fetching chat' });
   }
 };
 
-// Create new chat
+// Create a new chat
 exports.createChat = async (req, res) => {
   try {
-    const { participantIds, isGroup, groupName, groupAvatar } = req.body;
+    const { participantId } = req.body;
 
-    // Add current user to participants
-    const participants = [req.user.id, ...participantIds];
-
-    // Check if all participants exist
-    const users = await User.find({ _id: { $in: participants } });
-    if (users.length !== participants.length) {
-      return res.status(404).json({ message: 'One or more participants not found' });
+    // Check if participant exists
+    const participant = await User.findById(participantId);
+    if (!participant) {
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    // For direct chat, check if chat already exists
-    if (!isGroup) {
-      const existingChat = await Chat.findOne({
-        participants: { $all: participants },
-        isGroup: false
-      }).populate('participants', 'username email avatar');
+    // Check if chat already exists
+    const existingChat = await Chat.findOne({
+      participants: { $all: [req.user._id, participantId] },
+      isGroupChat: false
+    });
 
-      if (existingChat) {
-        return res.json(existingChat);
-      }
+    if (existingChat) {
+      return res.json(await existingChat.getChatDetails());
     }
 
     // Create new chat
     const chat = new Chat({
-      participants,
-      isGroup,
-      groupName,
-      groupAvatar,
-      groupAdmin: isGroup ? req.user.id : undefined
+      participants: [req.user._id, participantId],
+      isGroupChat: false
     });
 
     await chat.save();
-    const populatedChat = await chat.populate('participants', 'username email avatar');
 
-    res.status(201).json(populatedChat);
+    // Emit new chat to both participants
+    const io = getIO();
+    chat.participants.forEach(participantId => {
+      io.to(participantId.toString()).emit('new_chat', {
+        chat: chat
+      });
+    });
+
+    res.status(201).json(await chat.getChatDetails());
   } catch (error) {
-    res.status(500).json({ message: 'Error creating chat', error: error.message });
+    console.error('Error creating chat:', error);
+    res.status(500).json({ message: 'Error creating chat' });
+  }
+};
+
+// Create a group chat
+exports.createGroupChat = async (req, res) => {
+  try {
+    const { name, participants } = req.body;
+
+    // Add creator to participants
+    participants.push(req.user._id);
+
+    // Create group chat
+    const chat = new Chat({
+      participants,
+      isGroupChat: true,
+      groupName: name,
+      groupAdmin: req.user._id
+    });
+
+    await chat.save();
+
+    // Emit new chat to all participants
+    const io = getIO();
+    chat.participants.forEach(participantId => {
+      io.to(participantId.toString()).emit('new_chat', {
+        chat: chat
+      });
+    });
+
+    res.status(201).json(await chat.getChatDetails());
+  } catch (error) {
+    console.error('Error creating group chat:', error);
+    res.status(500).json({ message: 'Error creating group chat' });
   }
 };
 
@@ -164,10 +229,10 @@ exports.sendMessage = async (req, res) => {
   }
 };
 
-// Get AI reply
-exports.getAiReply = async (req, res) => {
+// Get AI response
+exports.getAIResponse = async (req, res) => {
   try {
-    const { chatId, messageId } = req.body;
+    const { chatId, content } = req.body;
 
     // Verify user is part of the chat
     const chat = await Chat.findOne({
@@ -176,49 +241,84 @@ exports.getAiReply = async (req, res) => {
     });
 
     if (!chat) {
-      return res.status(403).json({ message: 'Access denied' });
+      return res.status(403).json({ message: 'Not authorized to access this chat' });
     }
 
-    // Get the original message
-    const originalMessage = await Message.findById(messageId);
-    if (!originalMessage) {
-      return res.status(404).json({ message: 'Message not found' });
-    }
-
-    // Decrypt the original message
-    const decryptedContent = decryptMessage(originalMessage.content);
-
-    // TODO: Implement AI service integration here
+    // TODO: Implement AI response logic here
     // For now, return a mock response
-    const aiResponse = "This is a mock AI response. AI integration will be implemented later.";
-
-    // Encrypt AI response
-    const encryptedResponse = encryptMessage(aiResponse);
+    const aiResponse = {
+      content: "I'm an AI assistant. This is a mock response.",
+      isAIResponse: true
+    };
 
     // Create AI message
-    const message = await Message.create({
-      conversationId: chatId,
-      sender: process.env.AI_USER_ID, // This should be set in your environment variables
-      content: encryptedResponse,
-      messageType: 'text',
-      replyTo: messageId
+    const aiMessage = new Message({
+      chat: chatId,
+      sender: req.user._id, // You might want to create a special AI user
+      content: aiResponse.content,
+      isAIResponse: true
     });
 
+    if (chat.settings.encryption) {
+      await aiMessage.encryptContent();
+    }
+
+    await aiMessage.save();
+
     // Update chat's last message
-    await chat.updateLastMessage(message._id);
+    chat.lastMessage = aiMessage._id;
+    chat.lastMessageTime = new Date();
+    await chat.save();
 
-    // Populate message with sender info
-    await message.populate('sender', 'username avatar');
+    // Emit AI response to chat room
+    const io = getIO();
+    io.to(chatId).emit('new_message', {
+      message: await aiMessage.getMessageDetails()
+    });
 
-    // Get socket service
-    const socketService = req.app.get('socketService');
-
-    // Emit message to chat room
-    socketService.emitMessage(chatId, message);
-
-    res.status(201).json(message);
+    res.json(await aiMessage.getMessageDetails());
   } catch (error) {
-    res.status(500).json({ message: 'Error getting AI reply', error: error.message });
+    console.error('Error getting AI response:', error);
+    res.status(500).json({ message: 'Error getting AI response' });
+  }
+};
+
+// Update chat settings
+exports.updateChatSettings = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { notifications, encryption } = req.body;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
+    });
+
+    if (!chat) {
+      return res.status(403).json({ message: 'Not authorized to update this chat' });
+    }
+
+    // Update settings
+    if (notifications !== undefined) {
+      chat.settings.notifications = notifications;
+    }
+    if (encryption !== undefined) {
+      chat.settings.encryption = encryption;
+    }
+
+    await chat.save();
+
+    // Emit updated settings to chat room
+    const io = getIO();
+    io.to(chatId).emit('chat_settings_updated', {
+      chatId,
+      settings: chat.settings
+    });
+
+    res.json(chat);
+  } catch (error) {
+    console.error('Error updating chat settings:', error);
+    res.status(500).json({ message: 'Error updating chat settings' });
   }
 };
 
@@ -235,13 +335,21 @@ exports.searchMessages = async (req, res) => {
     });
 
     if (!chat) {
-      return res.status(403).json({ message: 'Access denied' });
+      return res.status(403).json({ message: 'Not authorized to access this chat' });
     }
 
-    const messages = await Message.searchMessages(chatId, query);
+    const messages = await Message.find({
+      chat: chatId,
+      content: { $regex: query, $options: 'i' }
+    })
+      .sort({ createdAt: -1 })
+      .populate('sender', 'username email avatar')
+      .limit(50);
+
     res.json(messages);
   } catch (error) {
-    res.status(500).json({ message: 'Error searching messages', error: error.message });
+    console.error('Error searching messages:', error);
+    res.status(500).json({ message: 'Error searching messages' });
   }
 };
 
@@ -249,36 +357,47 @@ exports.searchMessages = async (req, res) => {
 exports.markAsRead = async (req, res) => {
   try {
     const { chatId } = req.params;
-    const chat = await Chat.findById(chatId);
 
-    if (!chat) {
-      return res.status(404).json({ message: 'Chat not found' });
-    }
-
-    // Get socket service
-    const socketService = req.app.get('socketService');
-
-    // Update read status for all messages
-    chat.messages.forEach(message => {
-      if (!message.readBy.includes(req.user._id)) {
-        message.readBy.push(req.user._id);
-      }
+    // Verify user is part of the chat
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: req.user._id
     });
 
-    // Reset unread count for current user
-    chat.unreadCounts.set(req.user._id.toString(), 0);
-    await chat.save();
+    if (!chat) {
+      return res.status(403).json({ message: 'Not authorized to access this chat' });
+    }
 
-    // Emit message read status to chat room
-    socketService.emitToChat(chatId, 'messagesRead', {
+    // Mark all messages as read
+    await Message.updateMany(
+      {
+        chat: chatId,
+        sender: { $ne: req.user._id },
+        'readBy.user': { $ne: req.user._id }
+      },
+      { $push: { readBy: { user: req.user._id } } }
+    );
+
+    // Reset unread count
+    const unreadCount = chat.unreadCounts.find(
+      count => count.user.toString() === req.user._id.toString()
+    );
+    if (unreadCount) {
+      unreadCount.count = 0;
+      await chat.save();
+    }
+
+    // Emit read status
+    const io = getIO();
+    io.to(chatId).emit('messages_read', {
       chatId,
-      userId: req.user._id,
-      username: req.user.username
+      userId: req.user._id
     });
 
     res.json({ message: 'Messages marked as read' });
   } catch (error) {
-    res.status(500).json({ message: 'Error marking messages as read', error: error.message });
+    console.error('Error marking messages as read:', error);
+    res.status(500).json({ message: 'Error marking messages as read' });
   }
 };
 
